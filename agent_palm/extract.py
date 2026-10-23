@@ -104,6 +104,11 @@ def heuristic_extract(content: str, max_l0_chars: int = 280, max_l1_chars: int =
         else:
             break
     l0 = " ".join(l0_parts)[:max_l0_chars]
+    # Fallback: pathological content (no sentence split, e.g. long unbroken
+    # tokens) yields an empty L0 — carry the head of the content instead so
+    # the tier is never empty (mirrors the L1 fallback below).
+    if not l0:
+        l0 = content[:max_l0_chars]
     
     # L1: Key sentences + bullets + entities
     if not sentences:

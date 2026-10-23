@@ -132,9 +132,6 @@ class PalmPilot:
         # Auto-extract L0/L1
         l0, l1 = heuristic_extract(content)
         
-        # Embed for vector search
-        embedding = self.embedder.embed_single(l0 + " " + l1)
-        
         # Select store
         store = self.shared_store if pool == "shared" else self.store
         owner = "hermes" if pool == "shared" else self.agent_id
@@ -153,10 +150,16 @@ class PalmPilot:
             ttl_days=ttl_days,
         )
         
-        # Store vector
-        node_id = store.get_node_id(uri)
-        if node_id:
-            store.store_vector(node_id, embedding)
+        # Embed + store vector — NEW rows only. memories_vec maps id 1:1 to
+        # memories.id, so re-storing on the dedup-update path fails with a
+        # PRIMARY-KEY constraint. The existing embedding stays valid: the
+        # content hash matched, so the content (and therefore the embedding)
+        # is unchanged. Skipping also saves the embed pass on every duplicate.
+        if not is_dup:
+            embedding = self.embedder.embed_single(l0 + " " + l1)
+            node_id = store.get_node_id(uri)
+            if node_id:
+                store.store_vector(node_id, embedding)
         
         return uri
     

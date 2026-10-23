@@ -160,7 +160,7 @@ class ReviewManager:
             # Get all annotations for this memory
             annotations = conn.execute(
                 """
-                SELECT reviewer, verdict, confidence, review_text, evidence_uri, created_at, author
+                SELECT reviewer, verdict, confidence, review_text, evidence_uri, created_at, reviewer AS author
                 FROM annotations WHERE memory_id = ?
                 ORDER BY created_at
                 """, (node_id,)
@@ -185,8 +185,6 @@ class ReviewManager:
                 "UPDATE memories SET trust = ?, updated_at = ? WHERE uri = ?",
                 (new_trust, time.time(), uri)
             )
-            
-            conn.execute("COMMIT")
             
             return {
                 "memory_id": row[0],

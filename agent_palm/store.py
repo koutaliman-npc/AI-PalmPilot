@@ -676,15 +676,15 @@ class PalmStore:
 
         if level == "l0":
             text = row[8]
-            total = row[12]
+            total = row[11]
         elif level == "l1":
             text = row[9]
-            total = row[13]
+            total = row[12]
         elif level == "l2":
             if not row[10]:
                 return {"text": "", "truncated": False, "total_tokens": 0, "offset": 0}
             text = zlib.decompress(row[10]).decode("utf-8")
-            total = row[14] if row[14] else len(text) // 4
+            total = row[13] if row[13] else len(text) // 4
             # Pagination for L2
             if offset > 0 or len(text) > max_tokens:
                 end = min(offset + max_tokens, len(text))

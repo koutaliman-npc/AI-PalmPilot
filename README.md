@@ -17,6 +17,10 @@ A serverless, in-process memory layer for AI agents. No servers, no web UI, no d
 - **Personal + shared pools** — Each agent has a private vault; a shared pool for cross-agent learning.
 - **Self-improving review** — Agents annotate memories with confidence/verdicts; trust scores improve retrieval.
 - **Local embeddings** — ONNX Runtime + all-MiniLM-L6-v2 int8 (23MB). No llama.cpp, no compilation, no GPU needed.
+- **No automatic model download** — the loader is deliberately network-inert. It expects
+  `models/all-MiniLM-L6-v2_int8.onnx` + `models/tokenizer.json` inside $MEMPALM_PATH and raises
+  FileNotFoundError otherwise. Obtain them yourself (HF `sentence-transformers/all-MiniLM-L6-v2`,
+  ONNX int8 export) or run `python -m agent_palm.export_model`. For tests use `use_hash_embed=True`.
 - **CLI for humans** — `mempalm stats/prune/export/review/backup/reembed`
 - **Agent integrations** — Hermes MemoryProvider, MCP stdio tools, direct Python API
 
@@ -154,7 +158,7 @@ uri = palm.remember(
     ttl_days=30,                     # optional auto-expiry
     links=["mem://.../other"],       # optional cross-references
 )
-# Returns: MemoryRef(uri, pool, namespace, tokens, near_duplicate_of?)
+# Returns: the URI string, e.g. 'mem://personal/my-agent/decisions/note/abc123'
 
 # ─── SEARCH ───
 results = palm.search(
@@ -174,7 +178,8 @@ detail = palm.recall(
     max_tokens=4000,                 # cap for L2
     offset=0,                        # pagination for large L2
 )
-# Returns: RecallNode(uri, level, text, truncated, total_tokens, offset)
+# v1.2.0: recall() returns a dict {"text", "truncated", "total_tokens", "offset"}
+# (RecallNode objects are not returned; access r["text"]).
 
 # ─── ANNOTATE (Self-Improving Review) ───
 palm.annotate(
@@ -336,7 +341,11 @@ results = palm.search(
     max_tokens=1500,
     pool=MemoryPool.BOTH
 )
-# Use results in reasoning — they include L0/L1 with citations
+# v1.2.0: search() returns a list of dicts, one per hit:
+#   {"data": {id, uri, pool, owner, author, namespace, type, source, tags,
+#             l0, l1, tok_*, created_at, trust, verdict, score},
+#    "level": "l0"|"l1", "cost": int}
+# (the MemoryNode-object examples older documentation shows do not match)
 ```
 
 #### After Answering — Marking Usage
