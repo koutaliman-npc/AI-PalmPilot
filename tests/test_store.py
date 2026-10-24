@@ -203,7 +203,7 @@ def test_forget(palm_pilot):
 def test_version():
     """Test version is accessible"""
     from agent_palm import __version__
-    assert __version__ == "1.2.0"
+    assert __version__ == "1.2.1"
 
 
 if __name__ == "__main__":

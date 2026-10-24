@@ -56,7 +56,7 @@ def get_shared_store(use_hash_embed: bool = False) -> tuple:
 
 
 @click.group()
-@click.version_option(version="1.2.0")
+@click.version_option(version="1.2.1")
 @click.option("--root", default=DEFAULT_ROOT, envvar="MEMPALM_PATH", help="Root directory for mempalm data")
 @click.option("--hash-embed", is_flag=True, help="Use hash embedder (for testing, no model needed)")
 @click.pass_context
