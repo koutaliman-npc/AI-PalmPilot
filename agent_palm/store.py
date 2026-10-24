@@ -447,19 +447,25 @@ class PalmStore:
             ).fetchone()
 
             if dup_row:
-                # Update existing
+                # Update existing.
+                #
+                # NOTE: trust is intentionally NOT reset here. Re-remembering the
+                # same content is an idempotent no-op for review state - wiping
+                # trust back to the 0.5 prior would destroy trust earned from
+                # annotations (confirmed/reviewed memories silently regress).
+                # The same applies to `author`: the original author is preserved.
                 conn.execute(
                     """
                     UPDATE memories SET 
                         l0 = ?, l1 = ?, l2 = ?, tok_l0 = ?, tok_l1 = ?, tok_l2 = ?,
-                        tags = ?, fields = ?, updated_at = ?, author = ?, source = ?,
-                        expires_at = ?, trust = 0.5
+                        tags = ?, fields = ?, updated_at = ?, source = ?,
+                        expires_at = ?
                     WHERE uri = ?
                     """,
                     (
                         l0, l1, zlib.compress(content.encode("utf-8"), level=6),
                         self._estimate_tokens(l0), self._estimate_tokens(l1), self._estimate_tokens(content),
-                        tags_json, fields_json, time.time(), "agent", source,
+                        tags_json, fields_json, time.time(), source,
                         expires_at, dup_row[0]
                     )
                 )
@@ -482,9 +488,13 @@ class PalmStore:
             # created_at, updated_at, last_accessed_at, use_count, seq, trust, expires_at
             seq_val = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM memories").fetchone()[0]
 
-            # Explicit 23 values matching the 23 data columns
+            # Explicit 23 values matching the 23 data columns.
+            # NOTE: `author` must be the real author, not the literal "agent".
+            # recompute_trust compares the annotation's reviewer against the
+            # memory's author to detect a self-review; with a hardcoded
+            # "agent" the comparison could never fire correctly.
             values = (
-                uri, pool, owner, "agent", namespace, type_, source,
+                uri, pool, owner, author, namespace, type_, source,
                 json.dumps(list(tags)), json.dumps(fields) if fields else None,
                 l0, l1, zlib.compress(content.encode("utf-8"), level=6),
                 self._estimate_tokens(l0), self._estimate_tokens(l1), self._estimate_tokens(content),
@@ -518,13 +528,23 @@ class PalmStore:
             return uri, False, None
 
     def store_vector(self, node_id: int, embedding: list[float]):
-        """Store embedding vector for a memory (called after remember)"""
+        """
+        Store embedding vector for a memory (called after remember).
+
+        NOTE: sqlite-vec's vec0 virtual tables do NOT support INSERT OR REPLACE
+        (the "REPLACE" conflict-resolution clause is not honoured for vec0
+        primary keys and raises "UNIQUE constraint failed on memories_vec
+        primary key"). We therefore DELETE the existing row and INSERT the new
+        one, both inside a single transaction so a concurrent reader can never
+        observe the vector missing in between.
+        """
         import array
         conn = self.connect()
         # Convert list of floats to bytes for sqlite-vec
         vec_bytes = array.array('f', embedding).tobytes()
-        # Use INSERT OR REPLACE to handle duplicate vector entries
-        conn.execute("INSERT OR REPLACE INTO memories_vec(id, embedding) VALUES (?, ?)", (node_id, vec_bytes))
+        with self.transaction(immediate=True) as tx:
+            tx.execute("DELETE FROM memories_vec WHERE id = ?", (node_id,))
+            tx.execute("INSERT INTO memories_vec(id, embedding) VALUES (?, ?)", (node_id, vec_bytes))
 
     def search_fts(self, query: str, pool: str, namespace: Optional[str], k: int = 50) -> List[Tuple[int, float]]:
         """Search FTS5, return (rowid, bm25_score)"""
@@ -733,6 +753,32 @@ class PalmStore:
         conn = self.connect()
         row = conn.execute("SELECT id FROM memories WHERE uri = ?", (uri,)).fetchone()
         return row[0] if row else None
+
+    def get_node_id_by_hash(self, pool: str, namespace: str, content_hash: str) -> Optional[int]:
+        """
+        Get the internal node ID for an existing memory with the given content hash.
+
+        Used to decide whether a write needs a fresh embedding before the row is
+        committed (see PalmPilot.remember).
+        """
+        conn = self.connect()
+        row = conn.execute(
+            "SELECT id FROM memories WHERE pool = ? AND namespace = ? AND content_hash = ?",
+            (pool, namespace, content_hash),
+        ).fetchone()
+        return row[0] if row else None
+
+    def has_vector(self, node_id: int) -> bool:
+        """Check whether a memory row already has a stored embedding."""
+        conn = self.connect()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM memories_vec WHERE id = ? LIMIT 1", (node_id,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # sqlite-vec table unavailable - treat as "no vector"
+            return False
+        return row is not None
 
     def get_memory(self, uri: str) -> Optional[Dict]:
         """Get full memory record"""

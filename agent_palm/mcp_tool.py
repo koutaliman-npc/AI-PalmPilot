@@ -28,9 +28,11 @@ class MCPPalmServer:
             self.use_hash_embed = True
         else:
             self.use_hash_embed = os.environ.get("MEMPALM_HASH_EMBED", "false").lower() == "true"
-        self.root = os.environ.get("MEMPALM_PATH", os.path.expanduser("~/.mempalm"))
+        # Honour an explicit root= argument; fall back to $MEMPALM_PATH, then ~/.mempalm
+        self.root = root or os.environ.get("MEMPALM_PATH", os.path.expanduser("~/.mempalm"))
         
         # Initialize stores
+        os.makedirs(os.path.join(self.root, "agents"), exist_ok=True)
         self.personal_store = PalmStore(
             db_path=os.path.join(self.root, "agents", f"{os.environ.get('USER', 'agent')}.db")
         )
@@ -61,8 +63,18 @@ class MCPPalmServer:
         # Auto-extract L0/L1
         l0, l1 = heuristic_extract(content)
         
-        # Embed
-        embedding = self.embedder.embed_single(l0 + " " + l1)
+        # Embed BEFORE the row is committed: a row without a vector is
+        # invisible to semantic search, so a failed embed must not leave a
+        # half-written memory behind. Duplicates are detected up-front so
+        # they never pay the embed cost.
+        import hashlib
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        existing_id = store.get_node_id_by_hash(pool, namespace, content_hash)
+        existing_has_vector = existing_id is not None and store.has_vector(existing_id)
+        
+        embedding = None
+        if not existing_has_vector:
+            embedding = self.embedder.embed_single(l0 + " " + l1)
         
         # Store
         uri, is_dup, near_dup = store.remember(
@@ -77,10 +89,12 @@ class MCPPalmServer:
             ttl_days=ttl_days,
         )
         
-        # Store vector
-        node_id = store.get_node_id(uri)
-        if node_id:
-            store.store_vector(node_id, self.embedder.embed_single(l0 + " " + l1))
+        # Store the vector whenever we computed one (new row, or repairing a
+        # row whose vector went missing).
+        if embedding is not None:
+            node_id = store.get_node_id(uri)
+            if node_id:
+                store.store_vector(node_id, embedding)
         
         return {
             "uri": uri,

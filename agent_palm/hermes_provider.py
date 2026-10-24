@@ -89,8 +89,18 @@ class VaultMemoryProvider:
         # Auto-extract L0/L1
         l0, l1 = heuristic_extract(text)
         
-        # Embed for vector search
-        embedding = self.embedder.embed_single(l0 + " " + l1)
+        # Embed BEFORE the row is committed: a row without a vector is
+        # invisible to semantic search, so a failed embed must not leave a
+        # half-written memory behind. Duplicates are detected up-front so
+        # they never pay the embed cost.
+        import hashlib
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        existing_id = self._store.get_node_id_by_hash("personal", namespace, content_hash)
+        existing_has_vector = existing_id is not None and self._store.has_vector(existing_id)
+        
+        embedding = None
+        if not existing_has_vector:
+            embedding = self.embedder.embed_single(l0 + " " + l1)
         
         # Store in personal pool
         uri, is_dup, near_dup = self._store.remember(
@@ -106,8 +116,9 @@ class VaultMemoryProvider:
             ttl_days=metadata.get("ttl_days"),
         )
         
-        # Store vector only if not a duplicate
-        if not is_dup:
+        # Store the vector whenever we computed one (new row, or repairing a
+        # row whose vector went missing).
+        if embedding is not None:
             node_id = self._store.get_node_id(uri)
             if node_id:
                 self._store.store_vector(node_id, embedding)

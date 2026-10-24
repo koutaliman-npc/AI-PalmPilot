@@ -86,9 +86,10 @@ class PalmPilot:
         self._init_stores()
         self._init_embedder()
         
-        # Review manager
+        # Review manager - given both stores so shared-pool memories can be
+        # annotated, superseded, queued for review and marked as used.
         from .review import ReviewManager
-        self._review = ReviewManager(self.store)
+        self._review = ReviewManager(self.store, shared_store=self.shared_store)
     
     def _init_stores(self):
         """Initialize personal and shared stores"""
@@ -136,6 +137,32 @@ class PalmPilot:
         store = self.shared_store if pool == "shared" else self.store
         owner = "hermes" if pool == "shared" else self.agent_id
         
+        # ── Embed BEFORE the row is committed ──────────────────────────────
+        #
+        # The row must not exist without its vector: an un-vectorized memory
+        # is invisible to semantic search (FTS still finds it), so a partially
+        # written row is a silent data-quality bug. If the embedder raises
+        # (e.g. the ONNX model is not installed yet), nothing is written and
+        # the caller gets the original error.
+        #
+        # The duplicate case is detected up-front so duplicates never pay the
+        # embed cost. When an existing row already carries a vector we reuse
+        # it: the content hash matched, so the content (and therefore the
+        # embedding) is unchanged.
+        #
+        # If the row exists but its vector is MISSING (e.g. it was written by
+        # an older version that could fail between the row insert and the
+        # vector insert), we embed and re-store the vector so the memory is
+        # repaired rather than left permanently un-searchable.
+        import hashlib
+        content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        existing_id = store.get_node_id_by_hash(pool, namespace, content_hash)
+        existing_has_vector = existing_id is not None and store.has_vector(existing_id)
+        
+        embedding = None
+        if not existing_has_vector:
+            embedding = self.embedder.embed_single(l0 + " " + l1)
+        
         # Store
         uri, is_dup, near_dup = store.remember(
             content=content,
@@ -150,13 +177,11 @@ class PalmPilot:
             ttl_days=ttl_days,
         )
         
-        # Embed + store vector — NEW rows only. memories_vec maps id 1:1 to
-        # memories.id, so re-storing on the dedup-update path fails with a
-        # PRIMARY-KEY constraint. The existing embedding stays valid: the
-        # content hash matched, so the content (and therefore the embedding)
-        # is unchanged. Skipping also saves the embed pass on every duplicate.
-        if not is_dup:
-            embedding = self.embedder.embed_single(l0 + " " + l1)
+        # Store the vector whenever we computed one:
+        #   * new row            -> always needs its vector
+        #   * dedup, no vector  -> repairing a missing vector
+        #   * dedup, has vector -> skipped above (embedding is None)
+        if embedding is not None:
             node_id = store.get_node_id(uri)
             if node_id:
                 store.store_vector(node_id, embedding)
