@@ -136,7 +136,14 @@ def extract_temporal_constraint(
 
 def _extract_heuristic(query: str, ref_dt: datetime) -> TemporalConstraint:
     """Heuristic temporal extraction using regex patterns"""
-    import dateutil.parser
+    # python-dateutil is a declared dependency, but import it defensively so a
+    # partial/incomplete environment degrades this ONE pattern (month-name
+    # dates like "January 15, 2024") instead of crashing every search.
+    try:
+        import dateutil.parser
+        _have_dateutil = True
+    except ImportError:
+        _have_dateutil = False
     
     # Relative: "last week", "past month", etc.
     for pattern, ptype in TEMPORAL_PATTERNS:
