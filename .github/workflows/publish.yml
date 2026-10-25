@@ -1,0 +1,73 @@
+# GitHub Actions workflow for publishing AI PalmPilot to PyPI.
+#
+# Uses OpenID Connect **trusted publishing** -- no API token is stored in
+# GitHub. The publisher must be configured on PyPI as a pending publisher with
+# EXACTLY these three values:
+#
+#   Repository name : AI-PalmPilot
+#   Workflow name   : publish.yml      <- this file's name, must match exactly
+#   Environment name: pypi             <- must match `environment:` below
+#
+# To publish: push a tag (git tag v1.2.2 && git push origin v1.2.2), then
+# create a GitHub Release from that tag. PyPI upload is irreversible, so the
+# "pypi" environment should require a manual approval before the job runs
+# (repo Settings -> Environments -> pypi -> Required reviewers).
+#
+# Never enable this on push to a branch: every version number can only ever be
+# uploaded once.
+
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required by trusted publishing: the job mints a short-lived OIDC token.
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Check distribution metadata
+        run: |
+          python -m pip install twine
+          python -m twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # MUST match the Environment name entered on PyPI's pending-publisher form.
+    environment: pypi
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No credentials block: trusted publishing supplies them via OIDC.

@@ -40,3 +40,5 @@ models/*.onnx
 htmlcov/
 .pytest_cache/
 .tox/
+
+.venv-check/

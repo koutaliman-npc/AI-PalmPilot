@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package + test deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[export]"
+          python -m pip install pytest pytest-asyncio
+
+      - name: Compile-check all modules
+        run: python -m compileall -q agent_palm
+
+      - name: Run test suite
+        # The ONNX model (~23MB) is not shipped in the wheel. Tests that need
+        # real embeddings can download it, so they are allowed to skip cleanly
+        # when it is absent; every other test must pass.
+        run: python -m pytest tests/ -v --no-header -p no:cacheprovider
+
+      - name: Build distributions and check metadata
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*

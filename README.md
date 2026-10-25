@@ -1,4 +1,4 @@
-# 🌿 AI PalmPilot v1.2.0 — Memory for Agents, By Agents
+# 🌿 AI PalmPilot v1.2.1 — Memory for Agents, By Agents
 
 **Side Note:** 
 > I appreciate the vision behind OpenViking, but when I explored the open‑source implementation, I found it far more complicated than it needed to be. There were too many moving parts, too many subsystems, and yet another server instance running on another localhost. I'm tired of tools that require full server environments just to deliver functionality that should live inside the plugin or extension itself. I don't need a UI dashboard to click through or a memory viewer to babysit. I'm not the one who should be managing that—my agent should. I shouldn't have to open a control panel at all.
@@ -26,7 +26,77 @@ A serverless, in-process memory layer for AI agents. No servers, no web UI, no d
 
 ---
 
-## What's New in v1.2
+## What's New in v1.2.1
+
+> **This is a bug-fix release.** v1.2.0 shipped with a set of defects found by
+> an independent reviewer (agent `Eps`, via GitHub PR #1) and fixed here.
+> If you installed v1.2.0, upgrade — the earlier build had a **missing
+> dependency that made every `search()` crash on a clean install**.
+
+### 🐛 Bug Fixes (v1.2.0 → v1.2.1)
+
+**Correctness**
+- **`remember()` crashed when called twice** — `INSERT OR REPLACE` does not
+  work on sqlite-vec's `vec0` virtual tables, so a duplicate write raised
+  `UNIQUE constraint failed on memories_vec`. Replaced with a proper
+  delete-then-insert inside one transaction.
+- **`recall()` returned wrong token counts** — L2 reported the `created_at`
+  epoch (≈1.79 billion) because of an off-by-one in the column indices.
+- **`annotate()` crashed** on `no such column: author`; the query aliased the
+  reviewer column over the author column.
+- **Deduplication wiped state** — re-remembering identical content reset
+  `trust` to 0.5 and overwrote `author` with `"agent"`. Trust scores built up
+  from annotations were silently thrown away.
+- **Empty `L0` summaries** — degenerate/short content produced an empty L0
+  rather than falling back to the head of the content.
+- **`author` was hardcoded** on write, so "who wrote this" was never recorded.
+
+**Memory integrity**
+- **Orphaned rows.** A failed embed used to leave a memory row with no vector
+  — invisible to semantic search and permanently un-repairable. Embedding now
+  happens *before* the row is committed, and a rewrite repairs a missing
+  vector instead of skipping it.
+- **`forget()` left the vector row behind** — sqlite-vec tables cannot have
+  FK cascades, so the vector entry is now deleted explicitly.
+
+**The trust loop was inert**
+The self-improving review scored **every** review as a self-review, so
+cross-agent annotations only ever counted half weight and real corroboration
+never raised trust. Trust now compares against the memory's actual author:
+```python
+# Annotating a memory written by another agent  -> full weight
+palm_a.annotate("mem://personal/b/...",  verdict="confirmed", confidence=0.9)
+# Annotating your own memory                   -> half weight
+palm_a.annotate("mem://personal/a/...",  verdict="confirmed", confidence=0.9)
+```
+
+**Shared-pool review operations**
+`review_queue()`, `mark_used()`, `supersede()` and `changes_since()` now
+resolve the correct database, so shared-pool memories can be reviewed instead
+of silently hitting the personal vault. Also fixed the logical `OR` that made
+the review queue return already-confirmed items, and removed a stray
+double-`COMMIT` that made `supersede()` unreliable.
+
+**MCP + Hermes integration**
+The MCP server and the Hermes `MemoryProvider` still crashed on duplicate
+writes (only the direct API was fixed in the PR). Both paths are now atomic.
+`MCPPalmServer` also honours its `root` argument instead of always writing to
+`~/.mempalm`.
+
+**Packaging**
+- **`python-dateutil` was an undeclared dependency.** `retrieval.py` imports
+  it unguarded, so a clean `pip install` crashed on the first `search()`. It
+  is now declared, and the import falls back gracefully.
+- Removed a stray `store_test.py` that contained `INVALID_SYNTAX_HERE` and was
+  being shipped inside the wheel.
+- Added CI (tests on 3.11–3.13) and a PyPI trusted-publishing workflow.
+
+**Tests**
+13 new regression tests in `tests/test_regressions.py`, one per bug above —
+including duplicate writes, token counts, trust preservation, orphan repair,
+and the MCP/provider paths. Full suite: **31 passing**.
+
+---
 
 ### 🕐 Temporal Filtering
 Natural language time queries now work out of the box:
@@ -259,8 +329,25 @@ mempalm-mcp
 
 **Default:** `all-MiniLM-L6-v2 int8` (23MB, 384-dim, English-only)
 
-- Downloaded automatically to `$MEMPALM_PATH/models/` on first use
-- For multilingual: convert `multilingual-e5-small` to ONNX int8 and place in `$MEMPALM_PATH/models/`
+**Not downloaded automatically.** The loader is deliberately network-inert — it
+expects `models/all-MiniLM-L6-v2_int8.onnx` and `models/tokenizer.json` to
+already exist under `$MEMPALM_PATH` and raises `FileNotFoundError` otherwise.
+
+Get the model one of two ways:
+```bash
+# 1. Export it yourself (needs the optional extra: pip install agent-palm[export])
+python -m agent_palm.export_model --output $MEMPALM_PATH/models
+
+# 2. Fetch it manually from Hugging Face
+#    sentence-transformers/all-MiniLM-L6-v2 -> ONNX int8 export + tokenizer.json
+```
+
+For multilingual work, convert `multilingual-e5-small` to ONNX int8 and place it
+in the same directory.
+
+> Until a model is present, pass `use_hash_embed=True` to `PalmPilot(...)`.
+> That stub embedder makes everything runnable in tests and CI with no model
+> download at all — it is how the whole test suite passes.
 
 ---
 
@@ -270,6 +357,21 @@ mempalm-mcp
 - Windows 10/11, Linux, macOS
 - No GPU required (CPU inference ~3-8ms per embed)
 - ~200MB RAM (model + index + SQLite)
+
+**Runtime dependencies** (installed automatically by pip):
+
+| Package | Purpose |
+|---------|---------|
+| `sqlite-vec` | Vector search inside the same SQLite file |
+| `numpy` | Embedding arrays |
+| `python-dateutil` | Natural-language date parsing for temporal filtering |
+| `onnxruntime` | Local embedding inference |
+| `transformers`, `tokenizers` | Tokenizer for the ONNX model |
+| `huggingface-hub` | Only used if you choose to fetch the model yourself |
+| `click` | The `mempalm` CLI |
+
+Optional extras: `pip install agent-palm[export]` adds `sentence-transformers`
++ `optimum` for `python -m agent_palm.export_model`; `[dev]` adds `pytest`.
 
 ---
 
@@ -471,16 +573,22 @@ agent_palm/
 ├── embed.py             # OnnxEmbedder (lazy) + HashEmbedder (tests)
 ├── extract.py           # Heuristic L0/L1 extraction
 ├── retrieval.py         # RRF fusion, budget packing, citation verification
-├── review.py            # Annotations, trust, review queue
+├── review.py            # Annotations, trust, review queue (pool-aware)
 ├── hermes_provider.py   # Hermes MemoryProvider implementation
 ├── mcp_tool.py          # MCP stdio server + tools
+├── export_model.py      # python -m agent_palm.export_model -> ONNX int8 + tokenizer
 ├── mempalm.py           # Click CLI entry point
 ├── pyproject.toml       # Package config, deps, entry points
 ├── policy.toml          # Shared pool permissions (copy from policy.toml.example)
 ├── tests/
-│   └── test_store.py    # Tests: CRUD, search, crash recovery, backup, etc.
+│   ├── test_store.py        # Tests: CRUD, search, crash recovery, backup, etc.
+│   ├── test_regressions.py  # One test per bug fixed in v1.2.1
+│   └── test_isolation.py    # Forged-ID isolation boundary tests
 └── README.md            # This file
 ```
+
+> The `models/` directory (ONNX model + tokenizer, ~23MB) is **not** shipped in
+> the wheel. It is created on first use inside `$MEMPALM_PATH`. See *Model* below.
 
 ---
 
@@ -496,9 +604,15 @@ pytest tests/ -v
 # Run specific test
 pytest tests/test_store.py::test_remember_and_recall -v
 
-# Benchmark KNN (requires 100k synthetic nodes)
-python -m benchmarks.bench_knn --nodes 100000 --dim 384 --runs 100
+# Run all regression tests (the ones that gate a release)
+pytest tests/test_regressions.py -v
+
+# No ONNX model handy? The suite runs on a hash embedder. Export one first:
+#   pip install -e .[export] && python -m agent_palm.export_model
 ```
+
+> **Contributing:** `tests/test_regressions.py` is the contract. Every bug fix
+> must land with a test that fails on the old code and passes on the new.
 
 ---
 
