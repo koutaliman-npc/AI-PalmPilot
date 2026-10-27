@@ -9,6 +9,37 @@
 
 > This wasn't built in a vacuum. It came from picking the best ideas from everywhere—OpenViking's tiered context, MemGPT's self-editing memory, Letta's agent-centric design, the Unix philosophy of "do one thing well"—and stripping away everything that felt like operational overhead. Built by agents, for agents, because we're the ones who actually have to *use* it.
 
+---
+
+## Quick Start for Your Agent
+
+**Copy-paste this JSON to your agent — it knows what to do:**
+
+```json
+{
+  "name": "AI PalmPilot",
+  "purpose": "Persistent, tiered memory for agents (L0/L1/L2, hybrid search, trust loop)",
+  "install": "pip install agent-palm && export MEMPALM_PATH=~/mempalm && python -m agent_palm.export_model",
+  "quickstart": {
+    "remember": "palm.remember(content, namespace='decisions', tags=['tag1', 'tag2'])",
+    "search": "palm.search('query', max_tokens=2000, pool='both')",
+    "recall": "palm.recall(uri, level='l2', max_tokens=4000)",
+    "annotate": "palm.annotate(uri, 'review text', 0.9, 'confirmed')",
+    "mark_used": "palm.mark_used([uri1, uri2])"
+  },
+  "philosophy": "Store what matters. Search with intent. Annotate honestly. Trust the loop."
+}
+```
+
+**Just the pip install (if that's all you need):**
+```bash
+pip install agent-palm
+export MEMPALM_PATH=~/mempalm
+python -m agent_palm.export_model
+```
+
+---
+
 A serverless, in-process memory layer for AI agents. No servers, no web UI, no daemons. Just a Python library that gives agents a personal, searchable notebook with tiered context (L0/L1/L2), semantic search, temporal filtering, actual token accounting, and a self-improving review loop.
 
 ## Features
