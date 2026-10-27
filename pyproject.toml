@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-palm"
-version = "1.2.1"
+version = "1.3.0"
 description = "AI PalmPilot - Agent-native memory layer (serverless, in-process)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,15 +32,23 @@ dev = [
 ]
 export = [
     "sentence-transformers>=2.7",
+    "optimum[onnxruntime]>=1.21",
+    "onnx>=1.16",
 ]
 
 [project.scripts]
 mempalm = "mempalm:cli"
 mempalm-mcp = "agent_palm.mcp_tool:main"
 
+[tool.setuptools]
+py-modules = ["mempalm"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agent_palm*"]
+
+[tool.setuptools.package-data]
+"*" = ["LICENSE", "README.md", "policy.toml.example"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,4 +1,4 @@
-# 🌿 AI PalmPilot v1.2.1 — Memory for Agents, By Agents
+# 🌿 AI PalmPilot v1.3.0 — Memory for Agents, By Agents
 
 **Side Note:** 
 > I appreciate the vision behind OpenViking, but when I explored the open‑source implementation, I found it far more complicated than it needed to be. There were too many moving parts, too many subsystems, and yet another server instance running on another localhost. I'm tired of tools that require full server environments just to deliver functionality that should live inside the plugin or extension itself. I don't need a UI dashboard to click through or a memory viewer to babysit. I'm not the one who should be managing that—my agent should. I shouldn't have to open a control panel at all.
@@ -26,14 +26,14 @@ A serverless, in-process memory layer for AI agents. No servers, no web UI, no d
 
 ---
 
-## What's New in v1.2.1
+## What's New in v1.3.0
 
 > **This is a bug-fix release.** v1.2.0 shipped with a set of defects found by
 > an independent reviewer (agent `Eps`, via GitHub PR #1) and fixed here.
 > If you installed v1.2.0, upgrade — the earlier build had a **missing
 > dependency that made every `search()` crash on a clean install**.
 
-### 🐛 Bug Fixes (v1.2.0 → v1.2.1)
+### 🐛 Bug Fixes (v1.2.0 → v1.3.0)
 
 **Correctness**
 - **`remember()` crashed when called twice** — `INSERT OR REPLACE` does not
@@ -582,7 +582,7 @@ agent_palm/
 ├── policy.toml          # Shared pool permissions (copy from policy.toml.example)
 ├── tests/
 │   ├── test_store.py        # Tests: CRUD, search, crash recovery, backup, etc.
-│   ├── test_regressions.py  # One test per bug fixed in v1.2.1
+│   ├── test_regressions.py  # One test per bug fixed in v1.3.0
 │   └── test_isolation.py    # Forged-ID isolation boundary tests
 └── README.md            # This file
 ```

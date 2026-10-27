@@ -176,6 +176,10 @@ class VaultMemoryProvider:
                     k=limit, max_tokens=max_tokens
                 )
                 
+
+                # pack_budget wraps results in {"data": ..., "level": ..., "cost": ...}
+                # Unwrap to get the actual memory dicts
+                results = [r["data"] for r in results if "data" in r]
                 all_results.extend(results)
                 
             except Exception as e:

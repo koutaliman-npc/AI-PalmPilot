@@ -177,9 +177,10 @@ class PalmStore:
             # Initialize schema
             conn.executescript(SCHEMA_SQL)
 
-            # Verify virtual tables were created
-            vt = conn.execute("SELECT name FROM sqlite_master WHERE type='virtual' AND name LIKE 'memories_%'").fetchall()
-            print(f"Virtual tables created: {[v[0] for v in vt]}")
+            # Verify virtual tables were created (no stdout: MCP stdio uses stdout as JSON-RPC channel)
+            vt = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'memories_%'").fetchall()
+            import logging
+            logging.getLogger(__name__).debug("Virtual tables present: %s", [v[0] for v in vt])
 
             # Verify/initialize model metadata
             self._verify_or_init_meta(conn)
@@ -287,115 +288,6 @@ class PalmStore:
     def _make_uri(self, pool: str, owner: str, namespace: str, type_: str, content_hash: str) -> str:
         """Generate URI: mem://<pool>/<owner>/<namespace>/<type>/<hash_prefix>"""
         return f"mem://{pool}/{owner}/{namespace}/{type_}/{content_hash[:12]}"
-
-    def write_memory(
-        self,
-        *,
-        pool: str,
-        owner: str,
-        author: str,
-        namespace: str,
-        type_: str,
-        source: str,
-        tags: Sequence[str],
-        fields: Optional[Dict[str, Any]],
-        l0: str,
-        l1: str,
-        l2_raw: str,
-        tok_l0: int,
-        tok_l1: int,
-        tok_l2: int,
-        embedding: list[float],
-    ) -> Tuple[str, bool, Optional[str]]:
-        """
-        Write memory with all preprocessing done BEFORE transaction.
-        Returns (uri, is_near_duplicate, near_duplicate_uri)
-        """
-        # All preprocessing OUTSIDE transaction
-        compressed_l2 = zlib.compress(l2_raw.encode("utf-8"), level=6)
-        content_hash = hashlib.sha256(l2_raw.encode("utf-8")).hexdigest()
-        tags_json = json.dumps(list(tags))
-        fields_json = json.dumps(fields) if fields else None
-        now = time.time()
-
-        uri = f"mem://{pool}/{owner}/{namespace}/{content_hash[:12]}"
-
-        conn = self.connect()
-        try:
-            conn.execute("BEGIN IMMEDIATE")
-
-            # Check for exact duplicate (same content_hash in same pool/namespace)
-            dup_row = conn.execute(
-                "SELECT uri FROM memories WHERE pool = ? AND namespace = ? AND content_hash = ?",
-                (pool, namespace, content_hash)
-            ).fetchone()
-
-            is_dup = dup_row is not None
-            near_dup_uri = dup_row[0] if is_dup else None
-
-            if is_dup:
-                # Update existing record instead of inserting duplicate
-                conn.execute(
-                    """
-                    UPDATE memories SET 
-                        l0 = ?, l1 = ?, l2 = ?, tok_l0 = ?, tok_l1 = ?, tok_l2 = ?,
-                        tags = ?, fields = ?, updated_at = ?, author = ?, source = ?,
-                        trust = 0.5, expires_at = ?
-                    WHERE uri = ?
-                    """,
-                    (
-                        l0, l1, zlib.compress(l2_raw.encode("utf-8"), level=6),
-                        len(l0.split()) + len(l0) // 4,  # rough token counts
-                        len(l1.split()) + len(l1) // 4,
-                        len(l2_raw.split()) + len(l2_raw) // 4,
-                        json.dumps(list(set(json.loads("[]") + list(tags)))),
-                        json.dumps(fields) if fields else None,
-                        time.time(), author, source, None,
-                        near_dup_uri
-                    )
-                )
-                conn.execute("COMMIT")
-                return near_dup_uri, True, near_dup_uri
-
-            # Insert new memory
-            seq_val = conn.execute(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM memories"
-            ).fetchone()[0]
-
-            conn.execute(
-                """
-                INSERT INTO memories (
-                    uri, pool, owner, author, namespace, type, source, tags, fields,
-                    l0, l1, l2, tok_l0, tok_l1, tok_l2, content_hash,
-                    created_at, updated_at, seq, trust
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    f"mem://{pool}/{content_hash[:12]}",  # Will be updated with proper URI
-                    "personal", owner, "agent", namespace, "note", "inferred",
-                    "[]", None,
-                    "", "", None, 0, 0, 0, "dummy",
-                    time.time(), time.time(), 0, 0.5
-                )
-            )
-
-            # Get the actual rowid and update URI with proper hash
-            node_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            content_hash = hashlib.sha256(b"placeholder").hexdigest()  # Will be fixed
-
-            # Actually, let's do this properly with the real data
-            conn.execute("ROLLBACK")
-            raise NotImplementedError("Need to restructure - see below")
-
-        except sqlite3.OperationalError as e:
-            conn.execute("ROLLBACK")
-            if "busy" in str(e).lower() or "locked" in str(e).lower():
-                from .exceptions import PalmStorageBusyError
-                raise PalmStorageBusyError(f"Contention on {self.db_path}: write failed. Retryable.") from e
-            raise
-        except Exception:
-            conn.execute("ROLLBACK")
-            raise
 
     def remember(
         self,
