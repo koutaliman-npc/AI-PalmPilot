@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent_palm.store import PalmStore, open_store
 from agent_palm.embed import HashEmbedder, OnnxEmbedder, get_embedder
-from agent_palm.extract import heuristic_extract
+from agent_palm.extract import heuristic_extract, classify_namespace
 from agent_palm.retrieval import build_grounded_context, verify_citations
 from agent_palm.types import MemoryPool
 
@@ -54,11 +54,13 @@ class MCPPalmServer:
             return self.shared_store
         return self.personal_store
     
-    def tool_remember(self, content: str, namespace: str = "default", pool: str = "personal", 
+    def tool_remember(self, content: str, namespace: str = None, pool: str = "personal", 
                       tags: list = None, type_: str = "note", source: str = "inferred",
                       ttl_days: int = None) -> dict:
         """Store a memory"""
         store = self._get_store(pool)
+        if namespace is None:
+            namespace = classify_namespace(content)
         
         # Auto-extract L0/L1
         l0, l1 = heuristic_extract(content)
@@ -238,7 +240,7 @@ def handle_request(request: dict) -> dict:
                                 "type": "object",
                                 "properties": {
                                     "content": {"type": "string", "description": "Content to remember"},
-                                    "namespace": {"type": "string", "default": "default"},
+                                    "namespace": {"type": "string", "description": "Namespace (auto-classified when omitted)"},
                                     "pool": {"type": "string", "enum": ["personal", "shared"], "default": "personal"},
                                     "tags": {"type": "array", "items": {"type": "string"}},
                                     "type": {"type": "string", "default": "note"},

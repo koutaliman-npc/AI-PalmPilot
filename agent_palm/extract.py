@@ -169,6 +169,74 @@ def heuristic_extract(content: str, max_l0_chars: int = 280, max_l1_chars: int =
     return l0, l1
 
 
+# Canonical namespaces for automatic-capture classification. A memory that is
+# captured without an explicit namespace is bucketed by a deterministic keyword
+# allowlist (no ML). Order matters: the first category whose keywords match
+# wins, so more specific domains are checked before the generic fallback.
+_NAMESPACE_KEYWORDS = {
+    "infra": [
+        "deploy", "deployed", "deployment", "deploying", "docker", "container",
+        "kubernetes", "k8s", "server", "hostname", "dns", "tls", "ssl",
+        "certificate", "scan", "scanning", "scanner", "firewall", "ssh",
+        "uptime", "healthcheck", "monitoring", "alert", "systemd", "systemctl",
+        "cron", "database", "postgres", "mysql", "sqlite", "redis", "backup",
+        "disk", "cpu", "ram", "proxmox", "router", "proxy", "traefik", "nginx",
+        "api", "endpoint", "pipeline", "yaml", "config", "infra",
+        "infrastructure", "cluster", "kernel", "network",
+    ],
+    "home": [
+        "home", "house", "flat", "apartment", "room", "kitchen", "garage",
+        "garden", "heating", "boiler", "thermostat", "light", "lighting",
+        "door", "window", "roof", "appliance", "fridge", "laundry", "cleaning",
+        "electric", "electricity", "plumbing", "solar",
+    ],
+    "people": [
+        "friend", "family", "colleague", "contact", "birthday", "person",
+        "phone number", "email address", "neighbour", "neighbor", "lives at",
+        "works at",
+    ],
+    "projects": [
+        "project", "feature", "milestone", "roadmap", "deliverable", "sprint",
+        "pull request", "repository", "branch", "commit", "merge", "release",
+        "version", "todo", "task", "bug", "issue", "fix", "implement",
+        "implementation", "refactor", "requirement", "stakeholder", "meeting",
+        "decision", "decided", "agreed",
+    ],
+    "estate-events": [
+        "estate", "park", "event", "venue", "booking", "reservation", "visitor",
+        "tour", "wedding", "festival", "party", "gathering", "schedule",
+        "calendar", "rsvp", "ticket", "catering", "marquee", "grounds",
+        "gardens",
+    ],
+}
+
+# Word-boundary matcher: a single keyword matches only as a whole token, so
+# "port" would not match "important" — keywords that are genuinely short and
+# ambiguous are simply omitted from the allowlist instead.
+_NAMESPACE_PATTERNS = {
+    ns: [re.compile(r"\b" + re.escape(kw) + r"\b") for kw in kws]
+    for ns, kws in _NAMESPACE_KEYWORDS.items()
+}
+
+DEFAULT_NAMESPACE = "agent-memory"
+
+
+def classify_namespace(text: str, fallback: str = DEFAULT_NAMESPACE) -> str:
+    """Deterministically bucket *text* into a small canonical namespace set.
+
+    Pure case-insensitive keyword allowlist (no ML). Returns the first category
+    in ``_NAMESPACE_KEYWORDS`` whose keywords appear in *text*, else *fallback*
+    (default ``"agent-memory"``). Empty input always falls back.
+    """
+    if not text:
+        return fallback
+    lower = text.lower()
+    for namespace, patterns in _NAMESPACE_PATTERNS.items():
+        if any(p.search(lower) for p in patterns):
+            return namespace
+    return fallback
+
+
 def heuristic_extract_with_structure(content: str, structure: dict = None) -> Tuple[str, str]:
     """
     Extended extraction that uses document structure if available.
