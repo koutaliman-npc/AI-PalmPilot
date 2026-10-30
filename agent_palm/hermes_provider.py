@@ -10,7 +10,7 @@ from typing import List, Dict, Any, Optional, Sequence
 
 from agent_palm.store import PalmStore, open_store
 from agent_palm.embed import get_embedder
-from agent_palm.extract import heuristic_extract
+from agent_palm.extract import heuristic_extract, classify_namespace
 from agent_palm.retrieval import build_grounded_context, verify_citations
 from agent_palm.types import MemoryPool, MemorySource
 
@@ -22,7 +22,7 @@ class VaultMemoryProvider:
     Configuration via environment variables:
     - MEMPALM_PATH: Root directory for databases (default: ~/.mempalm)
     - MEMPALM_AGENT_ID: Agent identifier (default: current user)
-    - MEMPALM_NAMESPACE: Default namespace (default: "default")
+    - MEMPALM_NAMESPACE: Default namespace (default: auto-classified)
     - MEMPALM_HASH_EMBED: Use hash embedder for testing (default: false)
     """
     
@@ -32,7 +32,7 @@ class VaultMemoryProvider:
         # Configuration
         self.root = self.config.get("path") or os.environ.get("MEMPALM_PATH", os.path.expanduser("~/.mempalm"))
         self.agent_id = self.config.get("agent_id") or os.environ.get("MEMPALM_AGENT_ID") or os.environ.get("USER", "agent")
-        self.default_namespace = self.config.get("namespace") or os.environ.get("MEMPALM_NAMESPACE", "default")
+        self.default_namespace = self.config.get("namespace") or os.environ.get("MEMPALM_NAMESPACE") or ""
         self.use_hash_embed = self.config.get("hash_embed", os.environ.get("MEMPALM_HASH_EMBED", "false").lower() == "true")
         
         # Initialize store and embedder
@@ -69,7 +69,7 @@ class VaultMemoryProvider:
         Args:
             text: Content to remember
             metadata: Optional dict with:
-                - namespace: Namespace (default: config default)
+                - namespace: Namespace (default: auto-classified via keyword classifier)
                 - tags: List of tags
                 - type: Memory type (default: "note")
                 - source: "observed" | "user" | "inferred" | "imported" (default: "inferred")
@@ -80,7 +80,7 @@ class VaultMemoryProvider:
         """
         metadata = metadata or {}
         
-        namespace = metadata.get("namespace", self.default_namespace)
+        namespace = metadata.get("namespace") or self.default_namespace or classify_namespace(text)
         tags = metadata.get("tags", [])
         type_ = metadata.get("type", "note")
         source = metadata.get("source", "inferred")

@@ -14,7 +14,7 @@ from .types import (
 )
 from .store import PalmStore, PalmStorageBusyError, PalmModelMismatchError
 from .embed import OnnxEmbedder, HashEmbedder
-from .extract import heuristic_extract
+from .extract import heuristic_extract, classify_namespace
 from .retrieval import pack_budget, verify_citations, format_context, build_grounded_context, extract_temporal_constraint, TemporalConstraint, apply_temporal_filter
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     "OnnxEmbedder",
     "HashEmbedder",
     "heuristic_extract",
+    "classify_namespace",
     "pack_budget",
     "verify_citations",
     "format_context",
@@ -115,7 +116,7 @@ class PalmPilot:
     def remember(
         self,
         content: str,
-        namespace: str = "default",
+        namespace: str = None,
         tags: list = None,
         type_: str = "note",
         source: str = "inferred",
@@ -124,11 +125,22 @@ class PalmPilot:
     ) -> str:
         """
         Store a memory with automatic L0/L1 extraction and embedding.
-        
+
+        Provenance: ``source`` defaults to ``"inferred"`` (machine-derived
+        content). Pass ``source="user"`` only when the operator explicitly
+        stated the content; automatic captures must keep the default.
+
+        Namespace: when ``namespace`` is omitted, it is derived by a
+        deterministic keyword classifier into a small canonical set
+        (``infra``, ``home``, ``people``, ``projects``, ``estate-events``,
+        ``agent-memory``) rather than a junk ``"default"`` bucket.
+
         Returns:
             URI of the stored memory
         """
         tags = tags or []
+        if namespace is None:
+            namespace = classify_namespace(content)
         
         # Auto-extract L0/L1
         l0, l1 = heuristic_extract(content)

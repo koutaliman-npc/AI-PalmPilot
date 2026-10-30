@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from agent_palm.store import PalmStore, open_store
 from agent_palm.embed import OnnxEmbedder, HashEmbedder, get_embedder
-from agent_palm.extract import heuristic_extract
+from agent_palm.extract import heuristic_extract, classify_namespace
 from agent_palm.retrieval import build_grounded_context, verify_citations
 from agent_palm.types import MemoryPool
 from agent_palm.exceptions import PalmModelMismatchError, PalmStorageBusyError
@@ -75,7 +75,7 @@ def cli(ctx, root: str, hash_embed: bool):
 
 @cli.command()
 @click.argument("content")
-@click.option("--namespace", "-n", default="default", help="Namespace for the memory")
+@click.option("--namespace", "-n", default=None, help="Namespace for the memory (auto-classified when omitted)")
 @click.option("--pool", type=click.Choice(["personal", "shared"]), default="personal", help="Memory pool")
 @click.option("--tags", "-t", multiple=True, help="Tags for the memory")
 @click.option("--type", default="note", help="Memory type")
@@ -86,6 +86,9 @@ def remember(ctx, content: str, namespace: str, pool: str, tags: tuple, type: st
     """Store a memory with automatic L0/L1 extraction"""
     use_hash = ctx.obj["use_hash"]
     root = ctx.obj["root"]
+    
+    if namespace is None:
+        namespace = classify_namespace(content)
     
     if pool == "shared":
         store, embedder, owner = get_shared_store(use_hash)
