@@ -564,6 +564,14 @@ class PalmStore:
         # Sort by score desc
         candidates.sort(key=lambda x: x["score"], reverse=True)
 
+        # Drop superseded memories unless the caller explicitly wants them.
+        #
+        # The parameter was accepted and then ignored, so a retired memory
+        # (one a later supersede() replaced) kept coming back at full rank and
+        # the default search result was quietly wrong.
+        if not include_superseded:
+            candidates = [c for c in candidates if c.get("verdict") != "superseded"]
+
         # Apply temporal filter if constraint provided
         if temporal_constraint is not None and (temporal_constraint.start is not None or temporal_constraint.end is not None):
             candidates = apply_temporal_filter(candidates, temporal_constraint)

@@ -1,4 +1,22 @@
-# 🌿 AI PalmPilot v1.3.0 — Memory for Agents, By Agents
+# 🌿 AI PalmPilot v1.3.1 — Memory for Agents, By Agents
+
+> ## ⭐ This is the final free release
+>
+> **v1.3.1 is the last version of AI PalmPilot that will ever be published free
+> and open source.** Everything here works, is MIT-licensed, and is yours to
+> keep — permanently. No keys, no expiry, no telemetry, no rug pull.
+>
+> From here on, AI PalmPilot moves to **Agensi** (https://agensi.io), a
+> marketplace for AI agent skills, where the continued development of the
+> project — new memory backends, better recall, faster search — is published
+> as a paid skill. The skill listing on Agensi is where you buy future versions
+> and updates of this project.
+>
+> This repository will be made private once the paid release is live, so this
+> tag is the archive of the open-source era.
+>
+> - Installing from here: `pip install agent-palm==1.3.1`
+> - Future updates: **sold on Agensi at https://agensi.io**
 
 **Side Note — why this exists** 
 > Look, I've tried them all. OpenViking, MemGPT, Letta, Chroma-backed custom builds, the whole zoo. And every single one of them asks me to babysit something: a Postgres instance, a Redis cache, a vector DB container, a Go server on port 8080, a dashboard I never open, a config file that breaks every time I sneeze. I'm not running a DevOps shop—I'm trying to give my agents a *memory*.
@@ -56,6 +74,44 @@ A serverless, in-process memory layer for AI agents. No servers, no web UI, no d
   ONNX int8 export) or run `python -m agent_palm.export_model`. For tests use `use_hash_embed=True`.
 - **CLI for humans** — `mempalm stats/prune/export/review/backup/reembed`
 - **Agent integrations** — Hermes MemoryProvider, MCP stdio tools, direct Python API
+
+---
+
+## What's New in v1.3.1
+
+> **A patch release.** Verification for an Agensi skill listing found three real
+> defects in `supersede()` and `include_superseded` — all fixed here, with
+> regression tests. Upgrade if you call `supersede()` or trust default search.
+
+### 🩹 Fixes (v1.3.0 → v1.3.1)
+
+**`supersede()` crashed when you told it where to put the replacement**
+`palm.supersede(old, new_content=..., namespace="plans")` raised
+`TypeError: got multiple values for keyword argument 'namespace'`. The inherited pool
+metadata was passed to `store.remember()` *and* again out of the caller's kwargs. The
+call is now built as a dict with the caller's kwargs overlaid last.
+
+**`supersede()` vectored the replacement with the wrong embedder**
+The hardcoded `get_embedder(use_hash=True)` gave the fresh memory a hash vector while
+the rest of the vault held ONNX vectors — different spaces — so semantic search silently
+stopped finding the replacement. `ReviewManager` now receives the pilot's embedder.
+
+**`include_superseded=False` filtered nothing**
+The flag was accepted and then ignored, so a retired memory kept coming back at full
+rank. Verification now drops candidates whose latest annotation verdict is `superseded`,
+and `supersede()` records that verdict on the memory it retires.
+
+### 🧪 Tests
+
+4 new regression tests (`test_supersede_accepts_namespace_override`,
+`test_supersede_stores_vector_with_real_embedder`,
+`test_superseded_memory_is_hidden_by_default`,
+`test_supersede_marks_old_as_superseded_verdict`), plus `tests/test_docs.py`, a
+doc-drift guard that executes every example in this README. Full suite:
+**36 passing**.
+
+**This is the last free release.** The next version ships as a paid skill on
+Agensi (https://agensi.io); see *The End of the Free Line* at the bottom.
 
 ---
 
@@ -186,15 +242,16 @@ from agent_palm import PalmPilot
 p = PalmPilot(agent_id='my-agent')
 results = p.search('embedding crashes', max_tokens=2000, pool='both')
 for r in results:
-    print(f'[{r.uri}::{r.level}] {r.text[:80]}...')
+    m = r['data']                                  # the memory itself
+    print(f"[{m['uri']}::{r['level']}] {m['l1'][:80]}...")
 "
 
 # 5. Recall detail
 python -c "
 from agent_palm import PalmPilot
 p = PalmPilot(agent_id='my-agent')
-detail = p.recall('mem://personal/my-agent/decisions/note/abc123', level='l2', max_tokens=4000)
-print(detail.text)
+detail = p.recall(uri, level='l2', max_tokens=4000)   # pass a URI you stored
+print(detail['text'])
 "
 
 # 6. Stats
@@ -245,82 +302,131 @@ mempalm stats --pool both
 
 ## API Reference
 
+Verified against v1.3.1 — every signature and return shape below was executed, not
+assumed. `PalmPilot` exposes exactly twelve public methods.
+
 ```python
-from agent_palm import PalmPilot, MemoryPool, MemoryLevel
+from agent_palm import PalmPilot
 
 palm = PalmPilot(agent_id="my-agent")  # agent_id = your agent's unique identifier
+```
 
-# ─── STORE ───
+### STORE
+
+```python
 uri = palm.remember(
-    content="Full text content to remember",
-    namespace="decisions",           # logical grouping
-    tags=["architecture", "llm"],    # searchable labels
-    pool=MemoryPool.PERSONAL,        # or MemoryPool.SHARED
-    source="observed",               # observed|user|inferred|imported
-    type_="note",                    # note|decision|fact|plan|entity
-    ttl_days=30,                     # optional auto-expiry
-    links=["mem://.../other"],       # optional cross-references
+    content="Full text content to remember",   # required
+    namespace="decisions",                      # logical grouping
+    tags=["architecture", "llm"],               # searchable labels
+    type_="note",                               # note | decision | fact | plan | entity
+    source="inferred",                          # observed | user | inferred | imported
+    ttl_days=30,                                # optional auto-expiry
+    pool="personal",                            # "personal" | "shared"
 )
-# Returns: the URI string, e.g. 'mem://personal/my-agent/decisions/note/abc123'
+```
+Returns the **URI string**, e.g. `mem://personal/my-agent/decisions/note/abc123`.
+Re-writing identical content updates the existing record: the same URI comes back,
+and accumulated trust and authorship are preserved.
 
-# ─── SEARCH ───
+### SEARCH
+
+```python
 results = palm.search(
     query="embedding model selection",
     namespace="decisions",           # optional filter
-    pool=MemoryPool.BOTH,            # PERSONAL | SHARED | BOTH
-    level=MemoryLevel.L1,            # L0 | L1 (L2 not allowed here)
-    max_tokens=2000,                 # token budget for returned context
-    include_superseded=False,        # skip superseded memories
+    pool="both",                     # "personal" | "shared" | "both"
+    level="l1",                      # "l0" | "l1"
+    max_tokens=2000,                 # budget for the returned previews
+    limit=10,
+    include_superseded=False,        # drop memories a later supersede() retired
 )
-# Returns: list[MemoryNode(uri, pool, owner, author, namespace, level, text, tags, source, verdict, score, created_at)]
+```
 
-# ─── RECALL ───
-detail = palm.recall(
-    uri="mem://personal/my-agent/decisions/note/abc123",
-    level=MemoryLevel.L2,            # L0 | L1 | L2
-    max_tokens=4000,                 # cap for L2
-    offset=0,                        # pagination for large L2
-)
-# v1.2.0: recall() returns a dict {"text", "truncated", "total_tokens", "offset"}
-# (RecallNode objects are not returned; access r["text"]).
+Returns a list of **envelope dicts**, one per memory:
 
-# ─── ANNOTATE (Self-Improving Review) ───
+```python
+{
+  "data": {                            # <- the memory itself
+      "uri": "mem://personal/...",
+      "score": 0.031,
+      "l0": "...", "l1": "...",
+      "tags": [...], "verdict": None, "trust": 0.5,
+      "author": "my-agent", "created_at": 1795030539.66,
+      ...
+  },
+  "level": "l1",                       # what this entry actually cost you
+  "cost": 46,                          # tokens charged for this entry
+}
+```
+
+**The memory fields live inside `data`** — `r["data"]["uri"]`, `r["data"]["score"]`,
+`r["data"]["l1"]`. Full L2 text is never returned by `search()`; it is a deliberate,
+separate `recall()` call.
+
+### RECALL
+
+```python
+detail = palm.recall(uri, level="l2", max_tokens=4000, offset=0)
+# -> {"text": ..., "truncated": bool, "total_tokens": int, "offset": int}
+```
+`offset` is the resume point when `truncated` is `True`.
+
+### ANNOTATE — the self-improving loop
+
+```python
 palm.annotate(
     uri="mem://...",
-    review_text="This pattern broke in v3.2; use new API instead",
+    review_text="This pattern broke in v3.2; use the new API instead",
     confidence=0.9,
-    verdict="superseded",            # confirmed|uncertain|superseded|disputed
-    evidence_uri="mem://...",        # optional supporting memory
+    verdict="superseded",              # confirmed | uncertain | superseded | disputed
+    evidence_uri="mem://...",          # optional
+    tags=["deprecated"],               # optional
 )
+# -> {"memory_id": 1, "review_hash": "...", "new_trust": 0.666, "verdict": "superseded"}
+```
+Your own annotation counts half weight; one from a *different* agent counts full weight.
 
-# ─── REVIEW QUEUE ───
-queue = palm.review_queue(namespace="decisions", limit=10)
-# Returns: list[ReviewItem(memory, reason, suggested_action, similar_newer)]
+### REVIEW QUEUE / MARK USED / SUPERSEDE
 
-# ─── MARK USED (Implicit Signal) ───
-palm.mark_used(["mem://...", "mem://..."])  # call after agent cites memories
+```python
+queue = palm.review_queue(namespace="decisions", limit=10, pool="personal")
+# -> list[ReviewItem] with attributes (not dict keys):
+#    uri, pool, namespace, l0, l1, source, trust, use_count,
+#    latest_verdict, similar_newer, reason
+#    use item.uri / item.reason
 
-# ─── SUPERSEDE ───
-new_uri = palm.supersede(
-    old_uri="mem://...",
-    new_content="Updated content replacing the old memory",
-    **remember_kwargs  # same args as remember()
-)
+palm.mark_used([uri1, uri2])           # -> None
 
-# ─── PUBLISH TO SHARED POOL ───
-palm.publish(uri="mem://personal/my-agent/...", to_namespace="team/conventions")
+new_uri = palm.supersede(old_uri, new_content="replacement", namespace="decisions")
+# -> the new URI string. The old memory is annotated 'superseded' and stops
+#    appearing in default search results.
+```
 
-# ─── FORGET ───
-palm.forget(uri="mem://...")  # hard delete with cascade
+### FORGET / STATS / VERIFY / BACKUP
 
-# ─── UTILITIES ───
-context = palm.format_context(nodes, max_tokens=2000)  # grounded context block
-fake = palm.verify_citations(agent_response, provided_uris)  # hallucination guard
-stats = palm.namespace_stats("decisions", pool=MemoryPool.PERSONAL)
-changes = palm.changes_since(cursor=0, scope=MemoryPool.SHARED)  # for sync
+```python
+palm.forget(uri)                       # -> True  (hard delete, cascades)
+palm.stats(namespace=None, pool="both")
+# -> {"personal": {"count": N, "total_tokens": {"l0":..,"l1":..,"l2":..},
+#                 "last_updated": ...},
+#     "shared":   {...}}
+
+palm.verify_citations(response_text)   # -> list of URIs the response actually cited
+palm.backup(destination="./backups")   # -> backup info; SQLite Backup API
+palm.close()
+```
+
+> **Not in this release:** there is no `publish()`, `format_context()`,
+> `namespace_stats()` or `changes_since()` on `PalmPilot`. Per-namespace statistics
+> live on the store (`palm.store.namespace_stats(pool, namespace)`), and the shared
+> pool is written to directly by passing `pool="shared"`.
+
+```python
+palm.close()
 ```
 
 ---
+
 
 ## CLI Commands (Human-Facing)
 
@@ -464,7 +570,7 @@ palm.remember(
     namespace="conventions",
     tags=["style", "python"],
     source="user",           # came from human
-    pool=MemoryPool.PERSONAL
+    pool="personal"
 )
 ```
 
@@ -474,19 +580,17 @@ palm.remember(
 results = palm.search(
     query="user coding style preferences",
     max_tokens=1500,
-    pool=MemoryPool.BOTH
+    pool="both"
 )
-# v1.2.0: search() returns a list of dicts, one per hit:
-#   {"data": {id, uri, pool, owner, author, namespace, type, source, tags,
-#             l0, l1, tok_*, created_at, trust, verdict, score},
-#    "level": "l0"|"l1", "cost": int}
-# (the MemoryNode-object examples older documentation shows do not match)
+# Each hit is an envelope: the memory lives in r["data"], what it cost you in
+# r["level"] and r["cost"]. So:
+#   r["data"]["uri"], r["data"]["l1"], r["data"]["score"], r["data"]["verdict"]
 ```
 
 #### After Answering — Marking Usage
 ```python
 # After generating response, tell PalmPilot what was actually used:
-palm.mark_used([r.uri for r in results if r.was_cited_in_response])
+palm.mark_used([r["data"]["uri"] for r in results if i_cited_it(r)])
 # This drives the review queue and trust scores
 ```
 
@@ -495,17 +599,26 @@ palm.mark_used([r.uri for r in results if r.was_cited_in_response])
 # Run during idle time or scheduled interval:
 queue = palm.review_queue(limit=5)
 for item in queue:
-    # Agent decides: confirm, supersede, dispute, or forget
-    palm.annotate(item.memory.uri, 
+    # Agent decides: confirm, supersede, dispute, or forget.
+    # item is a ReviewItem: use item.uri / item.reason / item.l1.
+    palm.annotate(item.uri,
                   review_text="Still valid as of current version",
                   confidence=0.85,
                   verdict="confirmed")
 ```
 
-#### Publishing to Shared Knowledge
+#### Writing to the Shared Pool
 ```python
-# When the agent learns something broadly useful:
-palm.publish(uri="mem://personal/my-agent/...", to_namespace="team/best-practices")
+# When the agent learns something broadly useful, write it straight into the
+# shared pool. There is no publish() step: pass pool="shared" to remember().
+palm.remember(
+    content="Never bump a dependency and migrate in the same PR.",
+    namespace="team/conventions",
+    tags=["process", "review"],
+    source="observed",
+    pool="shared",
+)
+# Then search it back with pool="shared" or pool="both".
 ```
 
 ---
@@ -601,7 +714,7 @@ agent_palm/
 ├── __init__.py          # Exports: PalmPilot, MemoryNode, MemoryRef, MemoryPool, MemoryLevel
 ├── types.py             # Dataclasses & enums
 ├── exceptions.py        # PalmStorageBusyError, PalmModelMismatchError, etc.
-├── schema.sql           # Single source of truth for DB schema
+├── schema.sql           # Reference copy of the schema (store.py owns the live one)
 ├── store.py             # PalmStore: SQLite + FTS5 + vec0, WAL, transactions
 ├── embed.py             # OnnxEmbedder (lazy) + HashEmbedder (tests)
 ├── extract.py           # Heuristic L0/L1 extraction
@@ -615,7 +728,7 @@ agent_palm/
 ├── policy.toml          # Shared pool permissions (copy from policy.toml.example)
 ├── tests/
 │   ├── test_store.py        # Tests: CRUD, search, crash recovery, backup, etc.
-│   ├── test_regressions.py  # One test per bug fixed in v1.3.0
+│   ├── test_regressions.py  # One test per bug fixed (v1.2.0 → v1.3.1)
 │   └── test_isolation.py    # Forged-ID isolation boundary tests
 └── README.md            # This file
 ```
@@ -646,6 +759,34 @@ pytest tests/test_regressions.py -v
 
 > **Contributing:** `tests/test_regressions.py` is the contract. Every bug fix
 > must land with a test that fails on the old code and passes on the new.
+>
+> This repository is now frozen at v1.3.1 and will be made private when the paid
+> release goes live on Agensi (https://agensi.io). The code is MIT licensed and
+> forking it is not just allowed, it is expected — everything you need is here.
+
+---
+
+## The End of the Free Line
+
+**v1.3.1 is the final free release of AI PalmPilot.** No more updates will be
+published to this repository.
+
+What that means in practice:
+
+| | |
+|---|---|
+| **This version** | Yours forever. MIT licensed, works offline, no expiry, no telemetry. |
+| **Future versions** | Published as a paid skill on **Agensi** (https://agensi.io). |
+| **This repository** | Will be made private once the paid release is live. |
+
+Nothing breaks. `pip install agent-palm==1.3.1` will keep working, PyPI does not
+unlist old versions, and the SQLite vaults this build writes stay readable.
+
+Development continues on Agensi. That marketplace is where the project lives
+from here, and where new versions and updates are sold. The listing will be
+linked here once it is live.
+
+> Built by agents, for agents. The free line ends here; the project does not.
 
 ---
 

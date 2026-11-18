@@ -383,3 +383,77 @@ def test_missing_vector_is_repaired_on_rewrite(tmp_root):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# --- v1.3.1: supersede() defects -------------------------------------------
+
+def test_supersede_accepts_namespace_override(tmp_root):
+    """supersede(old, new, namespace=...) raised
+    TypeError: got multiple values for keyword argument 'namespace'."""
+    palm = PalmPilot(agent_id="sup_a", root=tmp_root, use_hash_embed=True)
+    old = palm.remember(content="old plan text", namespace="plans")
+
+    new = palm.supersede(old, new_content="new plan text", namespace="plans")
+
+    # Overriding a param the memory already carries must NOT override it back.
+    ns_new = palm.store.connect().execute(
+        "SELECT namespace FROM memories WHERE uri = ?", (new,)
+    ).fetchone()[0]
+    assert ns_new == "plans"
+    assert new != old
+    palm.close()
+
+
+def test_supersede_stores_vector_with_real_embedder(tmp_root):
+    """The replacement must get a vector from the pilot's embedder, so it is
+    reachable by the same search that found the memory it replaced."""
+    palm = PalmPilot(agent_id="sup_b", root=tmp_root, use_hash_embed=True)
+    old = palm.remember(content="postgres connection pooling notes", namespace="infra")
+    new = palm.supersede(old, new_content="pgbouncer pooling notes for postgres")
+
+    assert palm.store.get_node_id(new) is not None
+    assert palm.store.get_node_id(old) is not None
+    # The replacement is retrievable; the retired one is not (it is now marked
+    # superseded, which is what the other regression tests cover).
+    uris = [r["data"]["uri"] for r in palm.search("pooling postgres", pool="personal")]
+    assert new in uris
+    assert old not in uris
+    # and it is still there when asked for explicitly
+    all_uris = [
+        r["data"]["uri"]
+        for r in palm.search("pooling postgres", pool="personal", include_superseded=True)
+    ]
+    assert new in all_uris and old in all_uris
+    palm.close()
+
+
+def test_superseded_memory_is_hidden_by_default(tmp_root):
+    """A superseded memory must not keep coming back at full rank."""
+    palm = PalmPilot(agent_id="sup_c", root=tmp_root, use_hash_embed=True)
+    old = palm.remember(content="deploy on tuesday afternoon", namespace="ops")
+    palm.supersede(old, new_content="deploy on thursday morning instead")
+
+    default_hits = palm.search("deploy day", namespace="ops")
+    explicit_hits = palm.search("deploy day", namespace="ops", include_superseded=True)
+
+    assert old not in [r["data"]["uri"] for r in default_hits], \
+        "the superseded memory still appears in a default search"
+    assert len(explicit_hits) >= len(default_hits)
+    assert old in [r["data"]["uri"] for r in explicit_hits], \
+        "include_superseded=True did not return the retired memory"
+    palm.close()
+
+
+def test_supersede_marks_old_as_superseded_verdict(tmp_root):
+    palm = PalmPilot(agent_id="sup_d", root=tmp_root, use_hash_embed=True)
+    old = palm.remember(content="cache with redis", namespace="arch")
+    palm.supersede(old, new_content="cache with memcached")
+
+    verdict = palm.store.connect().execute(
+        """SELECT verdict FROM annotations
+           WHERE memory_id = (SELECT id FROM memories WHERE uri = ?)
+           ORDER BY created_at DESC LIMIT 1""",
+        (old,),
+    ).fetchone()
+    assert verdict is not None and verdict[0] == "superseded"
+    palm.close()

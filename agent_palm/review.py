@@ -106,16 +106,21 @@ def latest_per_agent(annotations: List[Dict[str, Any]]) -> Dict[str, Dict[str, A
 class ReviewManager:
     """Manages review loop: annotations, trust updates, review queue"""
     
-    def __init__(self, store, shared_store=None):
+    def __init__(self, store, shared_store=None, embedder=None):
         """
         Args:
             store: the personal store
             shared_store: the shared store (optional). When supplied, URIs in
                 the shared pool are resolved against it, so shared memories
                 can be annotated/reviewed instead of raising "Memory not found".
+            embedder: the embedder the pilot is using (optional). Passed in so
+                supersede() vectors the replacement with the real model instead
+                of the hash embedder; without it the embedder is resolved
+                lazily from the environment.
         """
         self.store = store
         self.shared_store = shared_store
+        self.embedder = embedder
     
     def _store_for_uri(self, uri: str):
         """Pick the store that owns a given memory URI."""
@@ -232,12 +237,21 @@ class ReviewManager:
             new_content: str,
             **remember_kwargs
         ) -> str:
-            """Create new memory that supersedes old one"""
+            """Create new memory that supersedes old one.
+
+            The replacement keeps the pool, owner, author and namespace of the
+            memory it supersedes unless the caller overrides them via
+            ``remember_kwargs``.
+            """
             # Create new memory
             from .extract import heuristic_extract
             from .embed import get_embedder
-        
-            embedder = get_embedder(use_hash=True)  # Use hash for now
+
+            # Vector the replacement with the SAME embedder the rest of the
+            # vault uses. Using the hash embedder here left the replacement
+            # with a vector from a different space than its neighbours, so
+            # semantic search silently stopped finding it.
+            embedder = self.embedder or get_embedder(use_hash=False)
             l0, l1 = heuristic_extract(new_content)
             embedding = embedder.embed_single(l0 + " " + l1)
         
@@ -257,15 +271,21 @@ class ReviewManager:
                 raise Exception(f"Memory not found: {old_uri}")
             old_pool, old_owner, old_author, old_namespace = old_meta
         
-            # Remember new content - inherit pool metadata from the superseded memory
-            new_uri, is_dup, _ = store.remember(
-                content=new_content,
-                pool=old_pool,
-                owner=old_owner,
-                author=old_author,
-                namespace=old_namespace,
-                **remember_kwargs
-            )
+            # Remember new content - inherit pool metadata from the superseded
+            # memory. Build the call as a dict and overlay the caller's kwargs
+            # last, so an explicit namespace=/pool=/owner=/author= cannot
+            # collide with the inherited value (that raised
+            # "got multiple values for keyword argument 'namespace'").
+            remember_call = {
+                "content": new_content,
+                "pool": old_pool,
+                "owner": old_owner,
+                "author": old_author,
+                "namespace": old_namespace,
+            }
+            remember_call.update(remember_kwargs)
+
+            new_uri, is_dup, _ = store.remember(**remember_call)
         
             # Store the vector for the new memory (skipped on the dedup path -
             # the existing embedding is still valid because the content hash
@@ -275,20 +295,44 @@ class ReviewManager:
                 if new_node_id:
                     store.store_vector(new_node_id, embedding)
         
-            # Link old -> new
+            # Link old -> new, and mark the old memory superseded.
+            #
+            # The edge alone was cosmetic: search still returned the stale
+            # memory because nothing recorded that it had been replaced, so
+            # include_superseded=False (the default) could not filter it out.
             conn = store.connect()
             with store.transaction() as conn:
-                old_id = conn.execute("SELECT id FROM memories WHERE uri = ?", (old_uri,)).fetchone()
+                old_row = conn.execute(
+                    "SELECT id, author FROM memories WHERE uri = ?", (old_uri,)
+                ).fetchone()
                 new_id = conn.execute("SELECT id FROM memories WHERE uri = ?", (new_uri,)).fetchone()
-            
-                if old_id and new_id:
+
+                if old_row and new_id:
+                    old_id, old_author = old_row
                     conn.execute(
                         "INSERT INTO edges (src_id, dst_uri, kind, created_at) VALUES (?, ?, 'supersedes', ?)",
-                        (old_id[0], new_uri, time.time())
+                        (old_id, new_uri, time.time())
+                    )
+
+                    # Record the supersede as an annotation with verdict
+                    # 'superseded' from the old memory's own author, so it is a
+                    # self-verdict (half weight) and does not inflate trust on
+                    # the record it is retiring.
+                    review_hash = hashlib.sha256(
+                        f"{old_uri}{old_author}superseded1.0".encode()
+                    ).hexdigest()[:16]
+                    conn.execute(
+                        """INSERT INTO annotations (
+                               memory_id, reviewer, verdict, confidence, review_text,
+                               evidence_uri, review_hash, created_at
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(memory_id, reviewer, review_hash) DO NOTHING""",
+                        (old_id, old_author, "superseded", 1.0,
+                         f"Superseded by {new_uri}", new_uri, review_hash, time.time())
                     )
                 # Transaction committed automatically by the context manager
                 # (an explicit COMMIT here would double-commit and raise).
-        
+
             return new_uri
     
     def review_queue(

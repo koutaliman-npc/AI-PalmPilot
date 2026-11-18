@@ -38,7 +38,7 @@ __all__ = [
     "PalmPilot",
 ]
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 
 class PalmPilot:
@@ -87,9 +87,14 @@ class PalmPilot:
         self._init_embedder()
         
         # Review manager - given both stores so shared-pool memories can be
-        # annotated, superseded, queued for review and marked as used.
+        # annotated, superseded, queued for review and marked as used, plus the
+        # embedder so supersede() vectors the replacement with the real model.
         from .review import ReviewManager
-        self._review = ReviewManager(self.store, shared_store=self.shared_store)
+        self._review = ReviewManager(
+            self.store,
+            shared_store=self.shared_store,
+            embedder=self.embedder,
+        )
     
     def _init_stores(self):
         """Initialize personal and shared stores"""
