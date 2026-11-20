@@ -290,5 +290,5 @@ class MemoryProvider:
 #   provider: agent_palm.hermes_provider.MemoryProvider
 #   agent_palm:
 #     path: D:/mempalm
-#     agent_id: sebastian
+#     agent_id: my-agent
 #     namespace: default

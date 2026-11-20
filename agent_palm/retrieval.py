@@ -703,10 +703,10 @@ if __name__ == "__main__":
     # Quick test
     test_nodes = [
         {
-            "uri": "mem://personal/sebastian/test/note/abc123",
+            "uri": "mem://personal/my-agent/test/note/abc123",
             "pool": "personal",
-            "owner": "sebastian",
-            "author": "sebastian",
+            "owner": "my-agent",
+            "author": "my-agent",
             "namespace": "test",
             "level": "l1",
             "text": "Decided to use ONNX Runtime for embeddings instead of llama.cpp.",
@@ -717,10 +717,10 @@ if __name__ == "__main__":
             "trust": 0.8,
         },
         {
-            "uri": "mem://shared/hermes/decision/xyz789",
+            "uri": "mem://shared/team/decision/xyz789",
             "pool": "shared",
-            "owner": "hermes",
-            "author": "ling",
+            "owner": "team",
+            "author": "my-agent",
             "namespace": "decisions",
             "level": "l0",
             "text": "Team agreed to use Python 3.11+ for all new services.",
@@ -759,8 +759,8 @@ if __name__ == "__main__":
     print(f"  Original: {len(test_nodes)}, Filtered: {len(filtered)}")
     
     # Test citation verification
-    response = 'We decided to use ONNX [mem://personal/sebastian/test/note/abc123] and the team agreed on Python 3.11 [mem://shared/hermes/decision/xyz789].'
-    provided = ["mem://personal/sebastian/test/note/abc123", "mem://shared/hermes/decision/xyz789"]
+    response = 'We decided to use ONNX [mem://personal/my-agent/test/note/abc123] and the team agreed on Python 3.11 [mem://shared/team/decision/xyz789].'
+    provided = ["mem://personal/my-agent/test/note/abc123", "mem://shared/team/decision/xyz789"]
     
     invalid = verify_citations(response, provided)
     print(f"\nInvalid citations: {invalid}")

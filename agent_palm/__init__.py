@@ -38,7 +38,7 @@ __all__ = [
     "PalmPilot",
 ]
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 
 class PalmPilot:
@@ -46,7 +46,7 @@ class PalmPilot:
     High-level agent-facing API for agent_palm.
     
     Usage:
-        palm = PalmPilot(agent_id="sebastian")
+        palm = PalmPilot(agent_id="my-agent")
         
         # Store a memory
         uri = palm.remember(

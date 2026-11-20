@@ -3,22 +3,21 @@
 # All agents can READ shared pool
 # Writers can PUBLISH to shared pool
 
+# Every value below is a placeholder. Replace them with your own agent ids.
+# See policy.toml.example for the fully commented template.
+
 [shared.writers]
 # Agents allowed to publish to shared pool
-sebastian = true
-ling = true
-elite-33 = true
+agent-alpha = true
 
 [shared.admins]
 # Agents with admin rights on shared pool (can forget, manage)
-sebastian = true
+admin-agent = true
 
 [shared.namespaces]
 # Per-namespace write permissions (override global writers)
 # "namespace" = ["allowed_agent1", "agent2"]
-projects.broken-kingdom = ["sebastian", "ling"]
-projects.hermeslink = ["sebastian", "elite-33"]
-docs = ["sebastian", "ling", "elite-33"]
+shared.notes = ["agent-alpha", "admin-agent"]
 
 [personal]
 # Each agent owns their personal DB

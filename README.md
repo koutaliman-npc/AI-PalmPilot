@@ -1,8 +1,8 @@
-# 🌿 AI PalmPilot v1.3.1 — Memory for Agents, By Agents
+# 🌿 AI PalmPilot v1.3.2 — Memory for Agents, By Agents
 
 > ## ⭐ This is the final free release
 >
-> **v1.3.1 is the last version of AI PalmPilot that will ever be published free
+> **v1.3.2 is the last version of AI PalmPilot that will ever be published free
 > and open source.** Everything here works, is MIT-licensed, and is yours to
 > keep — permanently. No keys, no expiry, no telemetry, no rug pull.
 >
@@ -15,7 +15,7 @@
 > This repository will be made private once the paid release is live, so this
 > tag is the archive of the open-source era.
 >
-> - Installing from here: `pip install agent-palm==1.3.1`
+> - Installing from here: `pip install agent-palm==1.3.2`
 > - Future updates: **sold on Agensi at https://agensi.io**
 
 **Side Note — why this exists** 
@@ -74,6 +74,38 @@ A serverless, in-process memory layer for AI agents. No servers, no web UI, no d
   ONNX int8 export) or run `python -m agent_palm.export_model`. For tests use `use_hash_embed=True`.
 - **CLI for humans** — `mempalm stats/prune/export/review/backup/reembed`
 - **Agent integrations** — Hermes MemoryProvider, MCP stdio tools, direct Python API
+
+---
+
+## What's New in v1.3.2
+
+> **A metadata and documentation release.** No library behaviour changed. A
+> packaging audit before listing the paid skill found that the published v1.3.1
+> wheel shipped personal authorship metadata and a non-existent CLI command in
+> its documentation. Both are corrected here.
+
+### 🔒 Metadata removed from the published package
+
+The v1.3.1 wheel's own metadata and `LICENSE` carried a personal author name and
+email address, and `policy.toml` — a placeholder file that ships inside the
+package — contained real agent ids and project names. Authorship is now attributed
+to the project (`AI PalmPilot contributors`), the copyright line matches, and
+`policy.toml` holds generic placeholders only.
+
+Nothing in this change affects how the library works. If you installed v1.3.1 you
+do not need to upgrade on the library's account — upgrade if you want the
+metadata and documentation corrections in the artifacts you redistribute.
+
+### 📖 Documentation corrections
+
+- **`mempalm export` never existed.** The README documented an `export` command
+  in four places; the CLI only implements `backup` (SQLite Backup API) and
+  `migrate` (`--source` / `--path`). The examples now show `backup`.
+- Sample `mem://` URIs in the `retrieval.py` and `extract.py` `__main__` examples
+  used a personal agent id; they now use `my-agent`.
+
+**This is still the last free release.** The next version ships as a paid skill on
+Agensi (https://agensi.io); see *The End of the Free Line* at the bottom.
 
 ---
 
@@ -302,7 +334,7 @@ mempalm stats --pool both
 
 ## API Reference
 
-Verified against v1.3.1 — every signature and return shape below was executed, not
+Verified against v1.3.2 — every signature and return shape below was executed, not
 assumed. `PalmPilot` exposes exactly twelve public methods.
 
 ```python
@@ -449,8 +481,8 @@ mempalm backup --destination /path/to/backups/mempalm_20241219
 # Prune old memories
 mempalm prune --older-than 90 --pool personal --namespace decisions
 
-# Export
-mempalm export --namespace decisions --format jsonl > backup.jsonl
+# Back up the vault (SQLite Backup API - safe while the agent is running)
+mempalm backup --destination ./backups
 
 # Review queue
 mempalm review --namespace decisions --unreviewed-only
@@ -641,7 +673,7 @@ palm.remember(
 |--------|------|
 | `mempalm stats` | Curiosity / debugging |
 | `mempalm backup` | Before major system changes |
-| `mempalm export` | Migration / archival |
+| `mempalm backup` | Migration / archival |
 | Adjust `MEMPALM_PATH` | Moving storage location |
 
 ---
@@ -760,7 +792,7 @@ pytest tests/test_regressions.py -v
 > **Contributing:** `tests/test_regressions.py` is the contract. Every bug fix
 > must land with a test that fails on the old code and passes on the new.
 >
-> This repository is now frozen at v1.3.1 and will be made private when the paid
+> This repository is now frozen at v1.3.2 and will be made private when the paid
 > release goes live on Agensi (https://agensi.io). The code is MIT licensed and
 > forking it is not just allowed, it is expected — everything you need is here.
 
@@ -768,7 +800,7 @@ pytest tests/test_regressions.py -v
 
 ## The End of the Free Line
 
-**v1.3.1 is the final free release of AI PalmPilot.** No more updates will be
+**v1.3.2 is the final free release of AI PalmPilot.** No more updates will be
 published to this repository.
 
 What that means in practice:
@@ -779,7 +811,7 @@ What that means in practice:
 | **Future versions** | Published as a paid skill on **Agensi** (https://agensi.io). |
 | **This repository** | Will be made private once the paid release is live. |
 
-Nothing breaks. `pip install agent-palm==1.3.1` will keep working, PyPI does not
+Nothing breaks. `pip install agent-palm==1.3.2` will keep working, PyPI does not
 unlist old versions, and the SQLite vaults this build writes stay readable.
 
 Development continues on Agensi. That marketplace is where the project lives

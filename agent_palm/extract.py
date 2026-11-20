@@ -182,7 +182,7 @@ def heuristic_extract_with_structure(content: str, structure: dict = None) -> Tu
 # For testing
 if __name__ == "__main__":
     test_content = """
-    Sebastian decided to use ONNX Runtime for embeddings instead of llama.cpp.
+    The agent decided to use ONNX Runtime for embeddings instead of llama.cpp.
     The decision was made because llama.cpp kept crashing with GGML_ASSERT errors.
     This is a critical fix for the memory system.
     
